@@ -1,0 +1,2691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aura OS</title>
+
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Load Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Load Inter Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Firebase Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, addDoc, onSnapshot, collection, query, orderBy, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Make Firebase services globally available to the OS
+        window.firebase = {
+            initializeApp,
+            getAuth,
+            signInAnonymously,
+            signInWithCustomToken,
+            onAuthStateChanged,
+            getFirestore,
+            doc,
+            addDoc,
+            onSnapshot,
+            collection,
+            query,
+            orderBy,
+            serverTimestamp,
+            setLogLevel
+        };
+    </script>
+
+    <style>
+        /* --- Base & Scrollbar --- */
+        html, body {
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background: #000;
+            user-select: none;
+        }
+
+        /* Custom scrollbar for window content */
+        .window-body::-webkit-scrollbar {
+            width: 8px;
+        }
+        .window-body::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }
+        .window-body::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+        .window-body::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.4);
+        }
+
+        /* --- Boot Screen --- */
+        #aura-boot-screen {
+            position: fixed;
+            inset: 0;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            transition: opacity 0.5s ease-out;
+        }
+        .boot-logo {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: 4px solid #fff;
+            border-top-color: transparent;
+            animation: boot-spin 1.5s ease-in-out infinite;
+        }
+        @keyframes boot-spin {
+            0% { transform: rotate(0deg) scale(0.9); }
+            50% { transform: rotate(180deg) scale(1); }
+            100% { transform: rotate(360deg) scale(0.9); }
+        }
+
+        /* --- Desktop --- */
+        #desktop-background {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            /* The "alive" gradient */
+            background: linear-gradient(-45deg, #ee7752, #e73c7e, #23a6d5, #23d5ab);
+            background-size: 400% 400%;
+            animation: gradient-flow 30s ease infinite;
+            transition: background 0.5s ease; /* Smooth transition for custom wallpaper */
+        }
+        @keyframes gradient-flow {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        
+        #desktop-icon-grid {
+            position: absolute;
+            inset: 0; /* Make it a canvas */
+            top: 2rem;
+            left: 2rem;
+        }
+        
+        .desktop-icon {
+            position: absolute; /* DRAGGABLE! */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.25rem;
+            color: #fff;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            cursor: pointer;
+            transition: transform 0.2s ease, background 0.2s ease;
+            text-align: center;
+            width: 80px;
+            padding: 0.25rem;
+            border-radius: 6px;
+        }
+        .desktop-icon:hover {
+            transform: scale(1.05);
+        }
+        .desktop-icon.is-dragging {
+            background: rgba(255, 255, 255, 0.2);
+            z-index: 1000;
+        }
+        .desktop-icon .icon-bg {
+            width: 60px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            transition: background 0.2s ease;
+            pointer-events: none; /* Pass clicks to parent */
+        }
+        .desktop-icon:hover .icon-bg {
+             background: rgba(255, 255, 255, 0.2);
+        }
+        .desktop-icon span {
+            font-size: 0.8rem;
+            font-weight: 500;
+            /* Ellipsis for long names */
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            width: 100%;
+            pointer-events: none; /* Pass clicks to parent */
+        }
+
+        /* --- Dock --- */
+        #aura-dock {
+            position: fixed;
+            bottom: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 1.25rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            z-index: 5000;
+        }
+
+        .dock-item {
+            width: 52px;
+            height: 52px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            cursor: pointer;
+            color: #fff;
+            transition: all 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+            transform-origin: bottom;
+            position: relative;
+        }
+        .dock-item:hover {
+            transform: scale(1.15) translateY(-6px);
+            background: rgba(255, 255, 255, 0.2);
+        }
+        .dock-item[data-app-id="clock"] {
+            width: auto;
+            padding: 0 0.75rem;
+            font-size: 0.8rem;
+            cursor: default;
+            text-align: right;
+            line-height: 1.4;
+            min-width: 90px;
+        }
+        .dock-item[data-app-id="clock"] #dock-clock {
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+        .dock-item[data-app-id="clock"]:hover {
+            transform: none;
+            background: transparent;
+        }
+        .dock-separator {
+            width: 1px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.2);
+            margin: 0 0.25rem;
+        }
+        
+        /* Active dot */
+        .dock-item .active-dot {
+            position: absolute;
+            bottom: 4px;
+            width: 6px;
+            height: 6px;
+            background: #fff;
+            border-radius: 50%;
+            box-shadow: 0 0 5px #fff;
+            opacity: 0;
+            transform: scale(0);
+            transition: all 0.2s ease;
+        }
+        .dock-item.active .active-dot {
+            opacity: 1;
+            transform: scale(1);
+        }
+        
+
+        /* --- Window --- */
+        #window-container {
+            position: fixed;
+            inset: 0;
+            pointer-events: none; /* Pass clicks through */
+        }
+        
+        /* Snap-to-maximize preview (PURGED) */
+
+        .app-window {
+            position: absolute;
+            min-width: 300px;
+            min-height: 200px;
+            background: rgba(24, 24, 27, 0.5); /* Darker glass */
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            pointer-events: auto; /* Windows are interactive */
+            
+            /* "Spring" open animation */
+            transform: scale(0.9);
+            opacity: 0;
+            animation: window-open 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            container-type: inline-size; /* Magic! */
+            transition: all 0.3s ease, opacity 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        /* Focus styles */
+        .app-window:not(.active) {
+            opacity: 0.9;
+        }
+        .app-window.active {
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.2);
+        }
+
+        .app-window.minimized {
+            transform: scale(0.8) translateY(200px);
+            opacity: 0;
+            pointer-events: none;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+        }
+        
+        .app-window.maximized {
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: calc(100% - 6rem) !important; /* Avoid dock */
+            border-radius: 0;
+        }
+
+        @keyframes window-open {
+            to {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .window-header {
+            flex-shrink: 0;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 0.75rem;
+            color: #fff;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .window-header.is-dragging {
+            cursor: grabbing;
+        }
+        
+        .window-title {
+            flex-grow: 1;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 600;
+            font-size: 0.9rem;
+            height: 100%;
+            cursor: grab;
+        }
+        
+        .window-controls {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .window-control {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+        }
+        .window-control:hover {
+            transform: scale(1.1);
+        }
+        .window-control.close { background: #ff5f57; }
+        .window-control.minimize { background: #ffbd2e; }
+        .window-control.maximize { background: #28c940; }
+
+        .window-body {
+            flex-grow: 1;
+            padding: 1rem;
+            overflow: auto;
+            color: #e4e4e7; /* Lighter text color */
+        }
+
+        /* --- Resize Handles --- */
+        .resize-handle {
+            position: absolute;
+            z-index: 10;
+        }
+        .resize-handle.n { top: -5px; left: 5px; right: 5px; height: 10px; cursor: n-resize; }
+        .resize-handle.s { bottom: -5px; left: 5px; right: 5px; height: 10px; cursor: s-resize; }
+        .resize-handle.e { top: 5px; bottom: 5px; right: -5px; width: 10px; cursor: e-resize; }
+        .resize-handle.w { top: 5px; bottom: 5px; left: -5px; width: 10px; cursor: w-resize; }
+        .resize-handle.nw { top: -5px; left: -5px; width: 10px; height: 10px; cursor: nw-resize; }
+        .resize-handle.ne { top: -5px; right: -5px; width: 10px; height: 10px; cursor: ne-resize; }
+        .resize-handle.sw { bottom: -5px; left: -5px; width: 10px; height: 10px; cursor: sw-resize; }
+        .resize-handle.se { bottom: -5px; right: -5px; width: 10px; height: 10px; cursor: se-resize; }
+        
+        /* --- Context Menu --- */
+        #context-menu {
+            position: fixed;
+            display: none;
+            flex-direction: column;
+            padding: 0.5rem;
+            background: rgba(30, 30, 30, 0.7);
+            backdrop-filter: blur(15px);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            z-index: 9999;
+            color: #fff;
+            font-size: 0.9rem;
+        }
+        .context-menu-item {
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.2s ease;
+        }
+        .context-menu-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .context-menu-separator {
+            height: 1px;
+            background: rgba(255, 255, 255, 0.1);
+            margin: 0.5rem 0;
+        }
+
+        /* --- App-Specific Styles --- */
+
+        /* Utility */
+        .hidden {
+            display: none;
+        }
+
+        /* Notepad App */
+        .notepad-textarea {
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: #e4e4e7;
+            font-family: 'Inter', sans-serif;
+            resize: none;
+        }
+
+        /* Settings App (Container Query Demo) */
+        .settings-content {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1rem;
+            height: 100%;
+        }
+        .settings-sidebar {
+            display: flex;
+            flex-direction: row; /* Stack horizontally on mobile */
+            gap: 0.5rem;
+            overflow-x: auto;
+            padding-bottom: 1rem;
+        }
+        .settings-sidebar-item {
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s ease;
+            white-space: nowrap;
+        }
+        .settings-sidebar-item.active {
+            background: rgba(255, 255, 255, 0.15);
+            font-weight: 600;
+        }
+        .settings-pane {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-y: auto; /* For update log */
+        }
+        .settings-pane.hidden {
+            display: none;
+        }
+        
+        /* Style for radio buttons */
+        .settings-pane input[type="radio"] {
+            -webkit-appearance: none;
+            appearance: none;
+            background-color: rgba(255, 255, 255, 0.1);
+            margin: 0;
+            font: inherit;
+            color: currentColor;
+            width: 1.15em;
+            height: 1.15em;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            transform: translateY(-0.075em);
+            display: grid;
+            place-content: center;
+            cursor: pointer;
+        }
+        .settings-pane input[type="radio"]::before {
+            content: "";
+            width: 0.65em;
+            height: 0.65em;
+            border-radius: 50%;
+            transform: scale(0);
+            transition: 120ms transform ease-in-out;
+            box-shadow: inset 1em 1em #fff;
+        }
+        .settings-pane input[type="radio"]:checked::before {
+            transform: scale(1);
+        }
+        .settings-pane input[type="radio"]:focus {
+            outline: 2px solid #23a6d5;
+            outline-offset: 2px;
+        }
+
+        /* Custom file input button */
+        .file-upload-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 6px;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            transition: background 0.2s ease;
+            font-size: 0.9rem;
+            display: inline-block;
+        }
+        .file-upload-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        .file-upload-btn input[type="file"] {
+            display: none;
+        }
+        .file-name-display {
+            font-size: 0.8rem;
+            color: #a1a1aa; /* zinc-400 */
+            margin-left: 0.5rem;
+            font-style: italic;
+        }
+
+        /* This is the container query! */
+        @container (min-width: 450px) {
+            .settings-content {
+                grid-template-columns: 1fr 2.5fr; /* Sidebar + Content */
+            }
+            .settings-sidebar {
+                flex-direction: column; /* Stack vertically */
+                overflow-x: hidden;
+                padding-bottom: 0;
+            }
+        }
+
+        /* Terminal App */
+        .terminal-output {
+            height: calc(100% - 30px);
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+        .terminal-line {
+            display: flex;
+        }
+        .terminal-prompt {
+            color: #28c940; /* Green prompt */
+            margin-right: 0.5rem;
+            flex-shrink: 0;
+        }
+        .terminal-input {
+            background: transparent;
+            border: none;
+            outline: none;
+            color: #e4e4e7;
+            font-family: monospace;
+            flex-grow: 1;
+        }
+        
+        /* File Explorer App */
+        .file-explorer-layout {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        .file-explorer-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+        .file-explorer-nav-btn {
+            padding: 0.25rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+        .file-explorer-nav-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .file-explorer-address-bar {
+            flex-grow: 1;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.8rem;
+            color: #e4e4e7;
+        }
+        .file-explorer-content {
+            display: grid;
+            grid-template-columns: 1fr 3fr;
+            gap: 1rem;
+            height: 100%;
+            overflow: hidden; /* Important for layout */
+        }
+        .file-explorer-sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            overflow-y: auto;
+        }
+        .file-explorer-sidebar-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s ease;
+            font-size: 0.9rem;
+        }
+        .file-explorer-sidebar-item.active {
+            background: rgba(255, 255, 255, 0.15);
+            font-weight: 600;
+        }
+        .file-explorer-pane {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 0.5rem;
+            border-radius: 8px;
+            overflow-y: auto;
+        }
+        .file-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+            gap: 1rem;
+            padding: 0.5rem;
+        }
+        .file-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.25rem;
+            color: #fff;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+            text-align: center;
+            width: 80px;
+        }
+        .file-item:hover {
+            transform: scale(1.05);
+        }
+        .file-item .icon-bg {
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            transition: background 0.2s ease;
+        }
+        .file-item:hover .icon-bg {
+             background: rgba(255, 255, 255, 0.1);
+        }
+        .file-item span {
+            font-size: 0.75rem;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            width: 100%;
+        }
+
+        /* Update Log Styles */
+        .update-log-entry {
+            margin-bottom: 1rem;
+        }
+        .update-log-entry h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #fff;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 0.25rem;
+            margin-bottom: 0.5rem;
+        }
+        .update-log-entry ul {
+            list-style-type: disc;
+            padding-left: 1.25rem;
+            font-size: 0.9rem;
+            color: #e4e4e7;
+        }
+        .update-log-entry li {
+            margin-bottom: 0.25rem;
+        }
+        .update-log-entry .badge {
+            font-size: 0.75rem;
+            padding: 0.1rem 0.5rem;
+            border-radius: 99px;
+            font-weight: 600;
+            margin-left: 0.25rem;
+        }
+        .badge.new { background: #28c940; color: #000; }
+        .badge.improved { background: #23a6d5; color: #000; }
+        .badge.fix { background: #ffbd2e; color: #000; }
+
+
+        /* Calculator App */
+        .calculator-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0.5rem;
+            height: 100%;
+        }
+        .calc-display {
+            grid-column: 1 / -1;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            padding: 0.5rem 1rem;
+            font-size: 2rem;
+            font-weight: 600;
+            text-align: right;
+            color: #fff;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .calc-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            font-size: 1.2rem;
+            font-weight: 500;
+            color: #fff;
+            cursor: pointer;
+            transition: background 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 50px;
+        }
+        .calc-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        .calc-btn.op {
+            background: rgba(23, 166, 213, 0.5); /* Blue */
+        }
+        .calc-btn.op:hover {
+            background: rgba(23, 166, 213, 0.7);
+        }
+        .calc-btn.clear {
+            background: rgba(231, 60, 126, 0.5); /* Pink/Red */
+        }
+        .calc-btn.clear:hover {
+            background: rgba(231, 60, 126, 0.7);
+        }
+        .calc-btn.span-2 {
+            grid-column: span 2;
+        }
+
+        /* Snake Game App */
+        .snake-app {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .snake-score {
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        #snake-canvas {
+            background: #111;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        /* Sketchpad App */
+        .sketchpad-app {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            gap: 0.5rem;
+        }
+        .sketchpad-controls {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .color-swatch {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s ease;
+        }
+        .color-swatch.active {
+            border-color: #fff;
+            transform: scale(1.1);
+        }
+        .sketchpad-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            padding: 0.25rem 0.75rem;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+        .sketchpad-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        #sketch-canvas {
+            background: #fff;
+            border-radius: 8px;
+            flex-grow: 1;
+            cursor: crosshair;
+        }
+        
+        /* Notification Center App */
+        .notification-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .notification-item {
+            background: rgba(0,0,0,0.2);
+            padding: 0.75rem;
+            border-radius: 8px;
+            border-left: 3px solid #23a6d5;
+        }
+        .notification-item h3 {
+            font-weight: 600;
+            color: #fff;
+        }
+        .notification-item p {
+            font-size: 0.9rem;
+            color: #e4e4e7;
+        }
+        .notification-item .time {
+            font-size: 0.8rem;
+            color: #a1a1aa;
+            margin-top: 0.25rem;
+        }
+        
+        /* App Launcher Overlay */
+        #app-launcher {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            z-index: 6000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+        }
+        #app-launcher.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+        .launcher-close-btn {
+            position: absolute;
+            top: 2rem;
+            right: 2rem;
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+        .launcher-close-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        .launcher-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            gap: 2rem;
+            padding: 2rem;
+            width: 100%;
+            max-width: 600px;
+            overflow-y: auto;
+            max-height: 80vh;
+        }
+        .launcher-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.75rem;
+            color: #fff;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+            width: 100px;
+            margin: 0 auto;
+        }
+        .launcher-item:hover {
+            transform: scale(1.05);
+        }
+        .launcher-item .icon-bg {
+            width: 70px;
+            height: 70px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            transition: background 0.2s ease;
+        }
+        .launcher-item:hover .icon-bg {
+             background: rgba(255, 255, 255, 0.2);
+        }
+        .launcher-item span {
+            font-size: 0.9rem;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            width: 100%;
+        }
+
+
+    </style>
+</head>
+<body class="bg-black text-white">
+
+    <!-- 1. Boot Screen -->
+    <div id="aura-boot-screen">
+        <div class="boot-logo"></div>
+    </div>
+
+    <!-- 2. Desktop -->
+    <div id="desktop-background"></div>
+    <div id="desktop-icon-grid">
+        <!-- Icons are now rendered by Desktop class from VFS -->
+    </div>
+
+    <!-- 3. Window Container -->
+    <div id="window-container">
+        <!-- Windows are dynamically created here -->
+    </div>
+    <!-- <div id="snap-preview"></div> PURGED -->
+
+    <!-- 4. Dock -->
+    <div id="aura-dock">
+        <div class="dock-item" data-action="open-launcher" title="App Launcher">
+            <i data-lucide="layout-grid"></i>
+        </div>
+        <div class="dock-separator"></div>
+        <div class="dock-item" data-app-id="file-explorer" title="File Explorer">
+            <i data-lucide="folder-search"></i>
+            <div class="active-dot"></div>
+        </div>
+        <div class="dock-item" data-app-id="music" title="Music">
+            <i data-lucide="music"></i>
+            <div class="active-dot"></div>
+        </div>
+        <div class="dock-item" data-app-id="snake" title="Snake">
+            <i data-lucide="gamepad-2"></i>
+            <div class="active-dot"></div>
+        </div>
+        <div class="dock-item" data-app-id="sketchpad" title="Sketchpad">
+            <i data-lucide="palette"></i>
+            <div class="active-dot"></div>
+        </div>
+        <div class="dock-item" data-app-id="calculator" title="Calculator">
+            <i data-lucide="calculator"></i>
+            <div class="active-dot"></div>
+        </div>
+        <div class="dock-item" data-app-id="notepad" title="Notepad">
+            <i data-lucide="notebook-tabs"></i>
+            <div class="active-dot"></div>
+        </div>
+        <div class="dock-item" data-app-id="settings" title="Settings">
+            <i data-lucide="sliders-horizontal"></i>
+            <div class="active-dot"></div>
+        </div>
+        <div class="dock-item" data-app-id="terminal" title="Terminal">
+            <i data-lucide="terminal"></i>
+            <div class="active-dot"></div>
+        </div>
+        <div class="dock-item" data-app-id="chrome" title="Chrome">
+            <i data-lucide="chrome"></i>
+            <div class="active-dot"></div>
+        </div>
+        <div class="dock-separator"></div>
+        <div class="dock-item" data-app-id="clock" title="Current Time">
+            <div>
+                <span id="dock-clock">12:00:00 PM</span>
+                <span id="dock-date" class="block opacity-70">11/21/2025</span>
+            </div>
+        </div>
+        <div class="dock-item" data-app-id="notifications" title="Notifications">
+            <i data-lucide="bell"></i>
+            <div class="active-dot"></div>
+        </div>
+        <div class="dock-item" title="Network (Coming Soon)">
+            <i data-lucide="wifi"></i>
+        </div>
+        <div class="dock-item" title="Power (Coming Soon)">
+            <i data-lucide="battery-full"></i>
+        </div>
+    </div>
+    
+    <!-- 5. Context Menu (Hidden) -->
+    <div id="context-menu">
+        <div class="context-menu-item" data-action="change-wallpaper">Change Wallpaper</div>
+        <div class="context-menu-item" data-action="new-folder">New Folder</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" data-action="about">About Aura OS</div>
+    </div>
+
+    <!-- 6. App Launcher (New) -->
+    <div id="app-launcher">
+        <div class="launcher-close-btn" data-action="close-launcher">
+            <i data-lucide="x"></i>
+        </div>
+        <div class="launcher-grid" data-app-id="launcher-grid">
+            <!-- Apps will be dynamically added here -->
+        </div>
+    </div>
+
+
+    <!-- Load Lucide Icons -->
+    <script>
+        lucide.createIcons();
+    </script>
+    
+    <!-- Aura OS JavaScript -->
+    <script type="module">
+        /**
+         * Aura OS (v1.8.4 "Syntax Purge")
+         * Core JavaScript
+         */
+        
+        // --- Global State ---
+        let maxZIndex = 100;
+        const openWindows = new Map(); // Tracks open windows by appId
+        let activeWindow = null;
+        let desktopDragState = {}; // For dragging desktop icons
+        let customWallpaperURL = null; // Store custom wallpaper
+        
+        // --- Desktop Environment ---
+    
+        const desktopBackground = document.getElementById('desktop-background');
+        const backgroundPresets = {
+            'aura': 'linear-gradient(-45deg, #ee7752, #e73c7e, #23a6d5, #23d5ab)',
+            'ocean': 'linear-gradient(-45deg, #023e8a, #0077b6, #0096c7, #48cae4)',
+            'sunset': 'linear-gradient(-45deg, #ff5e00, #ff9100, #ffbe0b, #fb5607)',
+            'matrix': 'linear-gradient(-45deg, #001a00, #003300, #005c00, #008000)'
+        };
+        const animationPresets = {
+            'aura': 'gradient-flow 30s ease infinite',
+            'ocean': 'gradient-flow 25s ease infinite',
+            'sunset': 'gradient-flow 20s ease infinite',
+            'matrix': 'gradient-flow 15s ease infinite'
+        };
+
+        function setDesktopBackground(preset, customURL = null) {
+            console.log("Setting background to:", preset || customURL); // DEBUG
+            if (customURL) {
+                desktopBackground.style.background = `url(${customURL})`;
+                desktopBackground.style.backgroundSize = 'cover';
+                desktopBackground.style.backgroundPosition = 'center';
+                desktopBackground.style.animation = 'none';
+            } else if (backgroundPresets[preset]) {
+                desktopBackground.style.background = backgroundPresets[preset];
+                desktopBackground.style.backgroundSize = '400% 400%';
+                desktopBackground.style.animation = animationPresets[preset];
+            }
+        }
+        
+        // --- Virtual File System (VFS) ---
+        // Now fully hierarchical
+        class VirtualFileSystem extends EventTarget {
+            constructor() {
+                super();
+                this.systemApps = { ...appManifest }; // Store app definitions
+                this.fs = {
+                    id: 'root', type: 'folder', name: 'root', children: [
+                        { id: 'desktop', type: 'folder', name: 'Desktop', icon: 'layout-grid', children: [
+                            // Apps on the desktop
+                            { id: 'file-explorer', name: 'File Explorer', type: 'app', icon: 'folder-search', x: 0, y: 0 },
+                            { id: 'music', name: 'Music', type: 'app', icon: 'music', x: 0, y: 96 },
+                            { id: 'snake', name: 'Snake', type: 'app', icon: 'gamepad-2', x: 0, y: 192 },
+                            { id: 'sketchpad', name: 'Sketchpad', type: 'app', icon: 'palette', x: 0, y: 288 },
+                            { id: 'calculator', name: 'Calculator', type: 'app', icon: 'calculator', x: 0, y: 384 },
+                            { id: 'notepad', name: 'Notepad', type: 'app', icon: 'notebook-tabs', x: 0, y: 480 },
+                            { id: 'settings', name: 'Settings', type: 'app', icon: 'sliders-horizontal', x: 96, y: 0 },
+                            { id: 'terminal', name: 'Terminal', type: 'app', icon: 'terminal', x: 96, y: 96 },
+                            { id: 'chrome', name: 'Chrome', type: 'app', icon: 'chrome', x: 96, y: 192 }
+                        ]},
+                        { id: 'documents', type: 'folder', name: 'Documents', icon: 'file-text', children: [
+                             { id: 'notepad', name: 'Notes', type: 'app', icon: 'notebook-tabs' }
+                        ] },
+                        { id: 'pictures', type: 'folder', name: 'Pictures', icon: 'image', children: [] },
+                        { id: 'games', type: 'folder', name: 'Games', icon: 'gamepad', children: [
+                            { id: 'snake', name: 'Snake', type: 'app', icon: 'gamepad-2' }
+                        ]}
+                    ]
+                };
+            }
+            
+            // Helper to find an item by path
+            _findItem(path) {
+                if (path === 'root') return this.fs;
+                const parts = path.split('/').filter(p => p); // e.g., ['desktop', 'folder-id']
+                let current = this.fs;
+                for (const part of parts) {
+                    if (current.type !== 'folder') return null; // Can't search non-folders
+                    const found = current.children.find(item => item.id === part);
+                    if (found) {
+                        current = found;
+                    } else {
+                        return null; // Not found
+                    }
+                }
+                return current;
+            }
+            
+            getItems(path) {
+                const item = this._findItem(path);
+                return (item && item.type === 'folder') ? item.children : [];
+            }
+            
+            getItem(path) {
+                return this._findItem(path);
+            }
+            
+            getApp(appId) {
+                return this.systemApps[appId];
+            }
+            
+            createFolder(path, baseName) {
+                const parent = this._findItem(path);
+                if (!parent || parent.type !== 'folder') return; // Invalid path
+                
+                // Handle name collisions
+                let newName = baseName;
+                let counter = 1;
+                const existingNames = parent.children.map(i => i.name);
+                while (existingNames.includes(newName)) {
+                    newName = `${baseName} (${counter++})`;
+                }
+                
+                const newFolder = {
+                    id: crypto.randomUUID(),
+                    name: newName,
+                    type: 'folder',
+                    icon: 'folder',
+                    children: [],
+                    x: 100, // Default position for new desktop folders
+                    y: 100 + (parent.children.length * 20) % 200
+                };
+                
+                parent.children.push(newFolder);
+                
+                // Notify subscribers (Desktop, File Explorer) that the VFS has changed
+                this.dispatchEvent(new CustomEvent('update', {
+                    detail: { path: path }
+                }));
+            }
+
+            updateItemPosition(itemId, newX, newY) {
+                const desktop = this._findItem('desktop');
+                const item = desktop.children.find(i => i.id === itemId);
+                if (item) {
+                    item.x = newX;
+                    item.y = newY;
+                    // Note: We don't need to dispatch an event for this
+                    // as only the Desktop class cares and it handles it.
+                }
+            }
+        }
+        
+
+        // --- App Manifest ---
+        // Defines all available applications
+        const appManifest = {
+            "file-explorer": {
+                title: "File Explorer",
+                icon: "folder-search",
+                width: 650,
+                height: 450,
+                content: `
+                    <div class="file-explorer-layout">
+                        <div class="file-explorer-toolbar">
+                            <div class="file-explorer-nav-btn" data-action="back">
+                                <i data-lucide="arrow-left" class="w-5 h-5"></i>
+                            </div>
+                            <input type="text" class="file-explorer-address-bar" readonly />
+                        </div>
+                        <div class="file-explorer-content">
+                            <div class="file-explorer-sidebar" data-app-id="file-explorer-sidebar">
+                                <div class="file-explorer-sidebar-item" data-path="desktop">
+                                    <i data-lucide="layout-grid" class="w-4 h-4"></i>
+                                    <span>Desktop</span>
+                                </div>
+                                <div class="file-explorer-sidebar-item" data-path="documents">
+                                    <i data-lucide="file-text" class="w-4 h-4"></i>
+                                    <span>Documents</span>
+                                </div>
+                                <div class="file-explorer-sidebar-item" data-path="pictures">
+                                    <i data-lucide="image" class="w-4 h-4"></i>
+                                    <span>Pictures</span>
+                                </div>
+                            </div>
+                            <div class="file-explorer-pane" data-app-id="file-explorer-pane">
+                                <div class="file-grid" data-app-id="file-grid">
+                                    <!-- File icons will be rendered here -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `
+            },
+            "calculator": {
+                title: "Calculator",
+                icon: "calculator",
+                width: 300,
+                height: 400,
+                content: `
+                    <div class="calculator-grid h-full p-1">
+                        <div class="calc-display">0</div>
+                        <div class="calc-btn clear span-2" data-key="C">C</div>
+                        <div class="calc-btn" data-key="CE">CE</div>
+                        <div class="calc-btn op" data-key="/">/</div>
+                        
+                        <div class="calc-btn" data-key="7">7</div>
+                        <div class="calc-btn" data-key="8">8</div>
+                        <div class="calc-btn" data-key="9">9</div>
+                        <div class="calc-btn op" data-key="*">x</div>
+                        
+                        <div class="calc-btn" data-key="4">4</div>
+                        <div class="calc-btn" data-key="5">5</div>
+                        <div class="calc-btn" data-key="6">6</div>
+                        <div class="calc-btn op" data-key="-">-</div>
+                        
+                        <div class="calc-btn" data-key="1">1</div>
+                        <div class="calc-btn" data-key="2">2</div>
+                        <div class="calc-btn" data-key="3">3</div>
+                        <div class="calc-btn op" data-key="+">+</div>
+                        
+                        <div class="calc-btn span-2" data-key="0">0</div>
+                        <div class="calc-btn" data-key=".">.</div>
+                        <div class="calc-btn op" data-key="=">=</div>
+                    </div>
+                `
+            },
+            "notepad": {
+                title: "Notepad",
+                icon: "notebook-tabs",
+                width: 400,
+                height: 300,
+                content: `<textarea class="notepad-textarea w-full h-full bg-transparent border-none outline-none text-zinc-200" placeholder="Start typing..."></textarea>`
+            },
+            "settings": {
+                title: "Settings",
+                icon: "sliders-horizontal",
+                width: 550,
+                height: 400,
+                content: `
+                    <div class="settings-content h-full">
+                        <div class="settings-sidebar" data-app-id="settings-sidebar">
+                            <div class="settings-sidebar-item active" data-pane="display">Display</div>
+                            <div class="settings-sidebar-item" data-pane="appearance">Appearance</div>
+                            <div class="settings-sidebar-item" data-pane="network">Network</div>
+                            <div class="settings-sidebar-item" data-pane="updates">Update Log</div>
+                            <div class="settings-sidebar-item" data-pane="about">About</div>
+                        </div>
+                        <div class="settings-pane" data-pane-id="display">
+                            <h2 class="text-lg font-semibold mb-4">Display</h2>
+                            <p>Resolution: 1920x1080</p>
+                            <p class="mt-2">Scaling: 100%</p>
+                            <p class="mt-4 text-sm text-zinc-400">Resize this window to see the container query in action!</p>
+                        </div>
+                        <div class="settings-pane hidden" data-pane-id="appearance">
+                            <h2 class="text-lg font-semibold mb-4">Appearance</h2>
+                            <p class="mb-2">Change desktop background:</p>
+                            <div class="flex flex-col gap-3" data-app-id="appearance-setter">
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="radio" name="wallpaper" value="aura" class="bg-transparent" checked> Aura Flow (Default)
+                                </label>
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="radio" name="wallpaper" value="ocean" class="bg-transparent"> Ocean Deep
+                                </label>
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="radio" name="wallpaper" value="sunset" class="bg-transparent"> Sunset Vibes
+                                </label>
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="radio" name="wallpaper" value="matrix" class="bg-transparent"> Terminal Green
+                                </label>
+                                
+                                <hr class="border-t border-white/10 my-1">
+                                
+                                <div class="flex flex-col gap-2">
+                                     <label class="flex items-center gap-2 cursor-pointer">
+                                        <input type="radio" name="wallpaper" value="custom" class="bg-transparent" data-app-id="custom-wallpaper-radio" disabled> Custom Image
+                                    </label>
+                                    <label class="file-upload-btn ml-6">
+                                        <input type="file" data-app-id="wallpaper-upload" accept="image/png, image/gif">
+                                        <i data-lucide="upload" class="w-4 h-4 inline-block -mt-1 mr-1"></i>
+                                        Upload Image (PNG/GIF)
+                                    </label>
+                                    <span class="file-name-display ml-6" data-app-id="wallpaper-file-name">No file chosen.</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="settings-pane hidden" data-pane-id="network">
+                            <h2 class="text-lg font-semibold mb-4">Network</h2>
+                            <p>Status: <span class="text-green-400">Connected</span></p>
+                            <p class="mt-2">SSID: AuraGuest</p>
+                        </div>
+                        <div class="settings-pane hidden" data-pane-id="updates">
+                            <h2 class="text-lg font-semibold mb-4">Update Log</h2>
+                            <div class="update-log-entry">
+                                <h3>v1.8.4 <span class="badge fix">Fix</span></h3>
+                                <ul>
+                                    <li>Removed stray variable declarations from inside the WindowManager class to fix the long-standing \`SyntaxError\`.</li>
+                                </ul>
+                            </div>
+                            <div class="update-log-entry">
+                                <h3>v1.8.3 <span class="badge fix">Fix</span></h3>
+                                <ul>
+                                    <li>Removed the final \`const snapPreview\` declaration causing the \`SyntaxError\`.</li>
+                                </ul>
+                            </div>
+                            <div class="update-log-entry">
+                                <h3>v1.8.2 <span class="badge fix">Fix</span></h3>
+                                <ul>
+                                    <li>Surgically removed all remaining \`snapPreview\` code to fix SyntaxError.</li>
+                                    <li>Added functional Battery and Network icons to the dock.</li>
+                                    <li>Added new real-time "Chat" app with Firebase.</li>
+                                </ul>
+                            </div>
+                            <div class="update-log-entry">
+                                <h3>v1.7.9 <span class="badge fix">Fix</span></h3>
+                                </ul>
+                            </div>
+                            <div class="update-log-entry">
+                                <h3>v1.7.0 <span class="badge new">New</span></h3>
+                                <ul>
+                                    <li>Added App Launcher (click the grid icon).</li>
+                                    <li>Added new "Sketchpad" (Paint) app.</li>
+                                    <li>Added new "Notification Center" app (click the bell).</li>
+                                    <li>Improved VFS with "Games" folder.</li>
+                                    <li>Desktop icons now include Files, Paint, and Notes.</li>
+                                </ul>
+                            </div>
+                            <div class="update-log-entry">
+                                <h3>v1.6.3 <span class="badge fix">Fix</span></h3>
+                                <ul>
+                                    <li>Updated the default music stream in the Music app.</li>
+                                </ul>
+                            </div>
+                            <div class="update-log-entry">
+                                <h3>v1.6.2 <span class="badge fix">Fix</span></h3>
+                                <ul>
+                                    <li>Fixed the Music app, which was blocked by YouTube. Swapped to a new stream.</li>
+                                </ul>
+                            </div>
+                            <div class="update-log-entry">
+                                <h3>v1.6.1 <span class="badge fix">Fix</span></h3>
+                                <ul>
+                                    <li>Removed the buggy "Snap-to-Maximize" feature to restore stability.</li>
+                                    <li>Fixed the critical click bug it re-introduced. All buttons are interactive again.</li>
+                                </ul>
+                            </div>
+                            <div class="update-log-entry">
+                                <h3>v1.6.0 <span class="badge new">New</span></h3>
+                                <ul>
+                                    <li>Added "Snap-to-Maximize" window feature (buggy).</li>
+                                    <li>Added live clock with seconds and date to dock.</li>
+                                    <li>Added new playable Snake game.</li>
+                                    <li>Added new Music Player app (with working embed).</li>
+                                    <li>Active window now has a focus glow.</li>
+                                    <li>Removed repetitive Welcome modal.</li>
+                                </ul>
+                            </div>
+                            <div class="update-log-entry">
+                                <h3>v1.5.10 <span class="badge fix">Fix</span></h3>
+                                <ul>
+                                    <li>Removed the buggy "snap-to-maximize" feature.</li>
+                                    <li>Fixed all known click-handling bugs.</li>
+                                </ul>
+                            </div>
+                            <div class="update-log-entry">
+                                <h3>v1.4 <span class="badge improved">Improved</span></h3>
+                                <ul>
+                                    <li>Added custom PNG/GIF wallpaper uploads in Settings.</li>
+                                </ul>
+                            </div>
+                            <div class="update-log-entry">
+                                <h3>v1.3 <span class="badge new">New</span></h3>
+                                <ul>
+                                    <li>Added draggable desktop icons!</li>
+                                    <li>Added a new Calculator app.</li>
+                                    <li>File Explorer now fully navigable.</li>
+                                </ul>
+                            </div>
+                             <div class="update-log-entry">
+                                <h3>v1.2 <span class="badge improved">Improved</span></h3>
+                                <ul>
+                                    <li>Added a Virtual File System (VFS).</li>
+                                    <li>Added the File Explorer app.</li>
+                                    <li>"New Folder" context menu item now works.</li>
+                                </ul>
+                            </div>
+                             <div class="update-log-entry">
+                                <h3>v1.1 <span class="badge improved">Improved</span></h3>
+                                <ul>
+                                    <li>Added "Google Chrome" app.</li>
+                                    <li>Settings app "Appearance" tab now works.</li>
+                                </ul>
+                            </div>
+                             <div class="update-log-entry">
+                                <h3>v1.0 <span class="badge new">New</span></h3>
+                                <ul>
+                                    <li>Initial release of Aura OS.</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="settings-pane hidden" data-pane-id="about">
+                            <h2 class="text-lg font-semibold mb-4">About</h2>
+                            <p>OS Name: Aura OS</p>
+                            <p class="mt-2">Version: 1.8.4 "Connected"</p>
+                            <p class="mt-2">Kernel: Web (JavaScript V8)</p>
+                            <p class="mt-4 text-xs text-zinc-400">© 2025 Aura Labs</p>
+                        </div>
+                    </div>
+                `
+            },
+            "terminal": {
+                title: "Terminal",
+                icon: "terminal",
+                width: 500,
+                height: 350,
+                content: `
+                    <div class="terminal-output" data-app-id="terminal-output">
+                        <p>Welcome to Aura OS Terminal [v1.0.0]</p>
+                        <p>Type 'help' for available commands.</p>
+                        <br>
+                    </div>
+                    <div class="terminal-line">
+                        <span class="terminal-prompt">aura></span>
+                        <input type="text" class="terminal-input" data-app-id="terminal-input" />
+                    </div>
+                `
+            },
+            "chrome": {
+                title: "Chrome",
+                icon: "chrome",
+                width: 800,
+                height: 600,
+                content: `<iframe src="https://www.google.com/search?igu=1&q=browser+os" class="w-full h-full border-0"></iframe>`
+            },
+            "music": {
+                title: "Music",
+                icon: "music",
+                width: 562,
+                height: 355,
+                content: `<iframe src="https://www.youtube.com/embed/CFGLoQIhmow?autoplay=1&si=_FEQmv3thP4htBf4" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen class="w-full h-full border-0"></iframe>`
+            },
+            "snake": {
+                title: "Snake",
+                icon: "gamepad-2",
+                width: 340,
+                height: 400,
+                content: `
+                    <div class="snake-app">
+                        <div class="snake-score mb-2">Score: <span data-app-id="snake-score">0</span></div>
+                        <canvas id="snake-canvas" width="300" height="300"></canvas>
+                        <p class="text-xs text-zinc-400 mt-2">Use Arrow Keys to move</p>
+                    </div>
+                `
+            },
+            "sketchpad": {
+                title: "Sketchpad",
+                icon: "palette",
+                width: 500,
+                height: 400,
+                content: `
+                    <div class="sketchpad-app">
+                        <div class="sketchpad-controls">
+                            <span class="text-sm font-medium mr-2">Colors:</span>
+                            <div class="color-swatch active" style="background: #FFF;" data-color="#FFF"></div>
+                            <div class="color-swatch" style="background: #ef4444;" data-color="#ef4444"></div>
+                            <div class="color-swatch" style="background: #f97316;" data-color="#f97316"></div>
+                            <div class="color-swatch" style="background: #eab308;" data-color="#eab308"></div>
+                            <div class="color-swatch" style="background: #22c55e;" data-color="#22c55e"></div>
+                            <div class="color-swatch" style="background: #3b82f6;" data-color="#3b82f6"></div>
+                            <div class="color-swatch" style="background: #a855f7;" data-color="#a855f7"></div>
+                            <button class="sketchpad-btn ml-auto" data-action="clear-canvas">Clear</button>
+                        </div>
+                        <canvas id="sketch-canvas" width="460" height="300"></canvas>
+                    </div>
+                `
+            },
+            "notifications": {
+                title: "Notifications",
+                icon: "bell",
+                width: 350,
+                height: 400,
+                content: `
+                    <div class="notification-list">
+                        <div class="notification-item">
+                            <h3>Welcome to Aura OS!</h3>
+                            <p>Check out the Settings app to customize your desktop.</p>
+                            <div class="time">1 minute ago</div>
+                        </div>
+                        <div class="notification-item">
+                            <h3>New High Score!</h3>
+                            <p>You scored 25 points in Snake. Nice one!</p>
+                            <div class="time">5 minutes ago</div>
+                        </div>
+                        <div class="notification-item">
+                            <h3>System Update</h3>
+                            <p>Aura OS v1.7.0 is ready to install.</p>
+                            <div class="time">1 hour ago</div>
+                        </div>
+                    </div>
+                `
+            },
+            "about": {
+                title: "About Aura OS",
+                icon: "info",
+                width: 350,
+                height: 300,
+                content: `
+                    <div class="flex flex-col items-center justify-center h-full text-center">
+                        <div class="boot-logo" style="width: 50px; height: 50px; border-width: 3px;"></div>
+                        <h2 class="text-xl font-bold mt-4">Aura OS</h2>
+                        <p class="text-sm text-zinc-300">v1.8.4 "Connected"</p>
+                        <p class="mt-4 text-xs">A beautiful, modern, and performant
+                        <br> browser-based operating system.</p>
+                        <p class="mt-4 text-xs text-zinc-400">
+                            Created by an expert
+                            <br> front-end engineer.
+                        </p>
+                    </div>
+                `
+            }
+        };
+
+        // --- Window Manager ---
+        class WindowManager {
+            constructor(container, vfs) {
+                this.container = container;
+                this.vfs = vfs;
+                this.dragState = {};
+                this.resizeState = {};
+                
+                document.addEventListener('mousedown', this.onGlobalMouseDown.bind(this));
+                document.addEventListener('mousemove', this.onGlobalMouseMove.bind(this));
+                document.addEventListener('mouseup', this.onGlobalMouseUp.bind(this));
+            }
+
+            // data is for "deep-linking"
+            createWindow(appId, data = null) {
+                // Allow only one instance of most apps
+                const singleInstanceApps = ['settings', 'calculator', 'terminal', 'file-explorer', 'music', 'snake', 'sketchpad', 'notifications'];
+                if (singleInstanceApps.includes(appId)) {
+                    if (openWindows.has(appId) && !openWindows.get(appId).classList.contains('minimized')) {
+                        this.bringToFront(openWindows.get(appId));
+                        return;
+                    }
+                    if (openWindows.has(appId) && openWindows.get(appId).classList.contains('minimized')) {
+                        this.restoreWindow(openWindows.get(appId));
+                        return;
+                    }
+                }
+                
+                // Exception for Notepad and Chrome: allow multiple
+                let windowId = appId;
+                if (appId === 'notepad' || appId === 'chrome') {
+                    windowId = `${appId}-${crypto.randomUUID()}`;
+                }
+                
+                if (openWindows.has(windowId)) {
+                     this.bringToFront(openWindows.get(windowId));
+                     return;
+                }
+
+                const app = this.vfs.getApp(appId);
+                if (!app) return;
+
+                const windowEl = document.createElement('div');
+                windowEl.className = 'app-window';
+                windowEl.dataset.appId = appId; // The app type
+                windowEl.dataset.windowId = windowId; // The unique window ID
+                
+                // Set initial position and size
+                const initialTop = 50 + (openWindows.size * 20) % 200;
+                const initialLeft = 100 + (openWindows.size * 30) % 300;
+                windowEl.style.cssText = `
+                    top: ${initialTop}px;
+                    left: ${initialLeft}px;
+                    width: ${app.width}px;
+                    height: ${app.height}px;
+                `;
+
+                windowEl.innerHTML = `
+                    <!-- Resize Handles -->
+                    <div class="resize-handle n"></div><div class="resize-handle e"></div>
+                    <div class="resize-handle s"></div><div class="resize-handle w"></div>
+                    <div class="resize-handle nw"></div><div class="resize-handle ne"></div>
+                    <div class="resize-handle sw"></div><div class="resize-handle se"></div>
+                
+                    <!-- Header -->
+                    <div class="window-header">
+                        <div class="window-title" data-drag-handle="true">
+                            <i data-lucide="${app.icon}" class="w-4 h-4"></i>
+                            <span>${app.title}</span>
+                        </div>
+                        <div class="window-controls">
+                            <div class="window-control minimize" data-action="minimize"></div>
+                            <div class="window-control maximize" data-action="maximize"></div>
+                            <div class="window-control close" data-action="close"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Body -->
+                    <div class="window-body">
+                        ${app.content}
+                    </div>
+                `;
+
+                this.container.appendChild(windowEl);
+                lucide.createIcons({
+                    nodes: [windowEl]
+                });
+                
+                this.bringToFront(windowEl);
+                openWindows.set(windowId, windowEl); // Use windowId
+                this.updateDockActiveState(appId, true);
+                
+                // Add app-specific logic
+                if (appId === 'terminal') {
+                    this.initTerminal(windowEl);
+                }
+                if (appId === 'settings') {
+                    this.initSettings(windowEl, data); // Pass data
+                }
+                if (appId === 'chrome' || appId === 'music') {
+                    // Remove padding from window body for iframe
+                    windowEl.querySelector('.window-body').style.padding = '0';
+                }
+                if (appId === 'file-explorer') {
+                    this.initFileExplorer(windowEl, data); // Pass data
+                }
+                if (appId === 'calculator') {
+                    this.initCalculator(windowEl);
+                }
+                if (appId === 'snake') {
+                    this.initSnakeGame(windowEl);
+                }
+                if (appId === 'sketchpad') {
+                    this.initSketchpad(windowEl);
+                }
+            }
+            
+            initTerminal(windowEl) {
+                const input = windowEl.querySelector('[data-app-id="terminal-input"]');
+                const output = windowEl.querySelector('[data-app-id="terminal-output"]');
+                
+                const printLine = (text) => {
+                    output.innerHTML += `<p>${text}</p>`;
+                    output.scrollTop = output.scrollHeight;
+                };
+
+                const printCommand = (cmd) => {
+                    output.innerHTML += `
+                        <div class="terminal-line">
+                            <span class="terminal-prompt">aura></span>
+                            <span>${cmd}</span>
+                        </div>
+                    `;
+                }
+
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && input.value) {
+                        const cmd = input.value.trim().toLowerCase();
+                        printCommand(cmd);
+                        
+                        switch(cmd) {
+                            case 'help':
+                                printLine("Available commands: help, clear, hello, date, easteregg");
+                                break;
+                            case 'clear':
+                                output.innerHTML = '';
+                                break;
+                            case 'hello':
+                                printLine("Hello there, human!");
+                                break;
+                            case 'date':
+                                printLine(new Date().toLocaleString());
+                                break;
+                            case 'easteregg':
+                                printLine("Look at you, being all curious!");
+                                printLine("Try typing 'matrix'");
+                                break;
+                            case 'matrix':
+                                printLine("The matrix has you...");
+                                windowEl.style.transition = 'all 0.5s ease';
+                                windowEl.style.background = 'rgba(0, 50, 0, 0.5)';
+                                windowEl.querySelector('.window-body').style.color = '#0f0';
+                                break;
+                            default:
+                                printLine(`Command not found: ${cmd}`);
+                        }
+                        
+                        input.value = '';
+                        output.scrollTop = output.scrollHeight;
+                    }
+                });
+            }
+
+            initSettings(windowEl, data) {
+                const sidebar = windowEl.querySelector('[data-app-id="settings-sidebar"]');
+                const panes = windowEl.querySelectorAll('.settings-pane');
+                const appearanceSetter = windowEl.querySelector('[data-app-id="appearance-setter"]');
+                const wallpaperUpload = windowEl.querySelector('[data-app-id="wallpaper-upload"]');
+                const customRadio = windowEl.querySelector('[data-app-id="custom-wallpaper-radio"]');
+                const fileNameDisplay = windowEl.querySelector('[data-app-id="wallpaper-file-name"]');
+
+                const setActivePane = (paneId) => {
+                    // Update sidebar active state
+                    sidebar.querySelectorAll('.settings-sidebar-item').forEach(i => {
+                        i.classList.toggle('active', i.dataset.pane === paneId);
+                    });
+                    
+                    // Show/hide panes
+                    panes.forEach(p => {
+                        p.classList.toggle('hidden', p.dataset.paneId !== paneId);
+                    });
+                }
+
+                sidebar.addEventListener('click', (e) => {
+                    const item = e.target.closest('.settings-sidebar-item');
+                    if (!item) return;
+                    setActivePane(item.dataset.pane);
+                });
+
+                if (appearanceSetter) {
+                    appearanceSetter.addEventListener('change', (e) => {
+                        console.log("Appearance change event:", e.target.value); // DEBUG
+                        if (e.target.name === 'wallpaper') {
+                            const value = e.target.value;
+                            if (value === 'custom') {
+                                if (customWallpaperURL) {
+                                    setDesktopBackground(null, customWallpaperURL);
+                                }
+                            } else {
+                                setDesktopBackground(value, null);
+                            }
+                        }
+                    });
+                }
+                
+                // Handle file upload
+                if (wallpaperUpload) {
+                    wallpaperUpload.addEventListener('change', (e) => {
+                        const file = e.target.files[0];
+                        if (!file || !['image/png', 'image/gif'].includes(file.type)) {
+                            fileNameDisplay.textContent = 'Invalid file type (PNG/GIF only).';
+                            fileNameDisplay.style.color = '#ff5f57'; // Red
+                            return;
+                        }
+                        
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                            customWallpaperURL = event.target.result;
+                            setDesktopBackground(null, customWallpaperURL);
+                            customRadio.disabled = false;
+                            customRadio.checked = true;
+                            fileNameDisplay.textContent = file.name;
+                            fileNameDisplay.style.color = '#a1a1aa'; // Back to normal
+                        };
+                        reader.readAsDataURL(file);
+                    });
+                }
+                
+                // On load, check if we have a custom wallpaper
+                if (customWallpaperURL) {
+                    customRadio.disabled = false;
+                }
+                
+                // Handle deep-linking
+                if (data && data.pane) {
+                    setActivePane(data.pane);
+                }
+            }
+            
+            initFileExplorer(windowEl, data) {
+                const sidebar = windowEl.querySelector('[data-app-id="file-explorer-sidebar"]');
+                const grid = windowEl.querySelector('[data-app-id="file-grid"]');
+                const backBtn = windowEl.querySelector('[data-action="back"]');
+                const addressBar = windowEl.querySelector('.file-explorer-address-bar');
+                
+                let pathHistory = [data && data.path ? data.path : 'desktop'];
+                let currentPath = pathHistory[pathHistory.length - 1];
+
+                const renderPane = (path) => {
+                    const item = this.vfs.getItem(path);
+                    if (!item || item.type !== 'folder') {
+                        console.error("Invalid path:", path);
+                        // Don't pop, just render the last valid path
+                        renderPane(pathHistory[pathHistory.length - 1]);
+                        return;
+                    }
+                    const items = item.children;
+                    currentPath = path;
+                    addressBar.value = `${path.replaceAll('/', ' > ').replace('root > ', '')}`;
+                    
+                    // Update sidebar active state
+                    sidebar.querySelectorAll('.file-explorer-sidebar-item').forEach(i => {
+                        i.classList.toggle('active', i.dataset.path === path);
+                    });
+                    
+                    grid.innerHTML = ''; // Clear current items
+                    
+                    if (items.length === 0) {
+                        grid.innerHTML = `<p class="text-zinc-400 text-sm p-2">This folder is empty.</p>`;
+                    }
+                    
+                    for (const item of items) {
+                        const itemEl = document.createElement('div');
+                        itemEl.className = 'file-item';
+                        itemEl.dataset.itemId = item.id;
+                        itemEl.dataset.itemType = item.type;
+                        itemEl.title = item.name;
+                        itemEl.innerHTML = `
+                            <div class="icon-bg">
+                                <i data-lucide="${item.icon}"></i>
+                            </div>
+                            <span>${item.name}</span>
+                        `;
+                        grid.appendChild(itemEl);
+                    }
+                    lucide.createIcons({ nodes: grid.querySelectorAll('.icon-bg') });
+                }
+                
+                const navigateTo = (path) => {
+                    if (this.vfs.getItem(path)) {
+                        if (path !== pathHistory[pathHistory.length - 1]) {
+                            pathHistory.push(path);
+                        }
+                        renderPane(path);
+                    }
+                }
+                
+                // Handle back button
+                backBtn.addEventListener('click', () => {
+                    if (pathHistory.length > 1) {
+                        pathHistory.pop();
+                        renderPane(pathHistory[pathHistory.length - 1]);
+                    }
+                });
+                
+                // Handle sidebar navigation
+                sidebar.addEventListener('click', (e) => {
+                    const item = e.target.closest('.file-explorer-sidebar-item');
+                    if (!item) return;
+                    navigateTo(item.dataset.path);
+                });
+                
+                // Handle grid navigation (double-click)
+                grid.addEventListener('dblclick', (e) => {
+                    const itemEl = e.target.closest('.file-item');
+                    if (!itemEl) return;
+                    
+                    const itemId = itemEl.dataset.itemId;
+                    const itemType = itemEl.dataset.itemType;
+                    
+                    if (itemType === 'folder') {
+                        navigateTo(`${currentPath}/${itemId}`);
+                    } else if (itemType === 'app') {
+                        this.createWindow(itemId);
+                    }
+                });
+                
+                // Listen for VFS updates
+                const onVFSUpdate = (e) => {
+                    if (e.detail.path === currentPath) {
+                        renderPane(currentPath);
+                    }
+                };
+                this.vfs.addEventListener('update', onVFSUpdate);
+                
+                // Unsubscribe when window is closed
+                windowEl.addEventListener('close', () => {
+                    this.vfs.removeEventListener('update', onVFSUpdate);
+                }, { once: true });
+
+                // Initial render
+                navigateTo(currentPath);
+            }
+            
+            initCalculator(windowEl) {
+                const display = windowEl.querySelector('.calc-display');
+                const grid = windowEl.querySelector('.calculator-grid');
+                
+                let currentValue = '0';
+                let operator = null;
+                let prevValue = null;
+                
+                const updateDisplay = () => {
+                    display.textContent = currentValue;
+                };
+
+                grid.addEventListener('click', (e) => {
+                    const btn = e.target.closest('.calc-btn');
+                    if (!btn) return;
+                    
+                    const key = btn.dataset.key;
+                    
+                    if (/\d/.test(key)) { // Number
+                        if (currentValue === '0' || currentValue === 'Error') {
+                            currentValue = key;
+                        } else {
+                            currentValue += key;
+                        }
+                    } else if (key === '.') { // Decimal
+                        if (!currentValue.includes('.')) {
+                            currentValue += '.';
+                        }
+                    } else if (key === 'C') { // Clear All
+                        currentValue = '0';
+                        operator = null;
+                        prevValue = null;
+                    } else if (key === 'CE') { // Clear Entry
+                        currentValue = '0';
+                    } else if (['+', '-', '*', '/'].includes(key)) { // Operator
+                        if (prevValue) {
+                            // Calculate existing
+                            currentValue = this.calculate(prevValue, currentValue, operator);
+                            updateDisplay();
+                        }
+                        operator = key;
+                        prevValue = currentValue;
+                        currentValue = '0';
+                    } else if (key === '=') { // Equals
+                        if (prevValue && operator) {
+                            currentValue = this.calculate(prevValue, currentValue, operator);
+                            prevValue = null;
+                            operator = null;
+                        }
+                    }
+                    updateDisplay();
+                });
+            }
+            
+            calculate(val1, val2, op) {
+                const num1 = parseFloat(val1);
+                const num2 = parseFloat(val2);
+                let result;
+                
+                switch(op) {
+                    case '+': result = num1 + num2; break;
+                    case '-': result = num1 - num2; break;
+                    case '*': result = num1 * num2; break;
+                    case '/': 
+                        if (num2 === 0) return 'Error';
+                        result = num1 / num2; 
+                        break;
+                    default: return val2;
+                }
+                // Format to avoid long decimals
+                return String(parseFloat(result.toPrecision(10)));
+            }
+
+            initSnakeGame(windowEl) {
+                const canvas = windowEl.querySelector('#snake-canvas');
+                const scoreEl = windowEl.querySelector('[data-app-id="snake-score"]');
+                const ctx = canvas.getContext('2d');
+
+                const gridSize = 20;
+                let tileCount = canvas.width / gridSize;
+
+                let snake = [{ x: 10, y: 10 }];
+                let velocity = { x: 0, y: 0 };
+                let food = { x: 15, y: 15 };
+                let score = 0;
+                let gameLoop;
+                let isGameOver = false;
+
+                function draw() {
+                    if (isGameOver) return;
+                    
+                    // Clear canvas
+                    ctx.fillStyle = '#111';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                    // Move snake
+                    const head = { x: snake[0].x + velocity.x, y: snake[0].y + velocity.y };
+                    snake.unshift(head);
+
+                    // Check for game over
+                    if (head.x < 0 || head.x >= tileCount || head.y < 0 || head.y >= tileCount || checkCollision(head)) {
+                        isGameOver = true;
+                        clearInterval(gameLoop);
+                        ctx.fillStyle = 'white';
+                        ctx.font = '30px Inter';
+                        ctx.fillText('Game Over', canvas.width / 2 - 80, canvas.height / 2);
+                        document.removeEventListener('keydown', handleKeydown); // Remove listener
+                        return;
+                    }
+
+                    // Check for food
+                    if (head.x === food.x && head.y === food.y) {
+                        score++;
+                        scoreEl.textContent = score;
+                        placeFood();
+                    } else {
+                        snake.pop();
+                    }
+
+                    // Draw snake
+                    ctx.fillStyle = '#28c940';
+                    snake.forEach(part => {
+                        ctx.fillRect(part.x * gridSize, part.y * gridSize, gridSize - 2, gridSize - 2);
+                    });
+
+                    // Draw food
+                    ctx.fillStyle = '#ff5f57';
+                    ctx.fillRect(food.x * gridSize, food.y * gridSize, gridSize - 2, gridSize - 2);
+                }
+
+                function placeFood() {
+                    food.x = Math.floor(Math.random() * tileCount);
+                    food.y = Math.floor(Math.random() * tileCount);
+                }
+
+                function checkCollision(head) {
+                    for (let i = 1; i < snake.length; i++) {
+                        if (head.x === snake[i].x && head.y === snake[i].y) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+
+                function handleKeydown(e) {
+                    // Prevent page from scrolling
+                    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+                        e.preventDefault();
+                    }
+                    
+                    switch (e.key) {
+                        case 'ArrowUp':
+                            if (velocity.y === 0) velocity = { x: 0, y: -1 };
+                            break;
+                        case 'ArrowDown':
+                            if (velocity.y === 0) velocity = { x: 0, y: 1 };
+                            break;
+                        case 'ArrowLeft':
+                            if (velocity.x === 0) velocity = { x: -1, y: 0 };
+                            break;
+                        case 'ArrowRight':
+                            if (velocity.x === 0) velocity = { x: 1, y: 0 };
+                            break;
+                    }
+                }
+                
+                // Add key listener only when window is active
+                const onFocus = () => document.addEventListener('keydown', handleKeydown);
+                const onBlur = () => document.removeEventListener('keydown', handleKeydown);
+                
+                windowEl.addEventListener('focus', onFocus);
+                windowEl.addEventListener('blur', onBlur);
+                onFocus(); // Focus by default when opening
+
+                gameLoop = setInterval(draw, 100);
+
+                // Clean up game loop when window is closed
+                windowEl.addEventListener('close', () => {
+                    clearInterval(gameLoop);
+                    onBlur(); // Remove listener
+                    windowEl.removeEventListener('focus', onFocus);
+                    windowEl.removeEventListener('blur', onBlur);
+                }, { once: true });
+            }
+
+            initSketchpad(windowEl) {
+                const canvas = windowEl.querySelector('#sketch-canvas');
+                const controls = windowEl.querySelector('.sketchpad-controls');
+                const ctx = canvas.getContext('2d');
+                let isDrawing = false;
+                
+                // Set default line style
+                ctx.strokeStyle = '#FFF';
+                ctx.lineWidth = 3;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                const startDrawing = (e) => {
+                    isDrawing = true;
+                    ctx.beginPath();
+                    ctx.moveTo(e.offsetX, e.offsetY);
+                };
+
+                const draw = (e) => {
+                    if (!isDrawing) return;
+                    ctx.lineTo(e.offsetX, e.offsetY);
+                    ctx.stroke();
+                };
+
+                const stopDrawing = () => {
+                    isDrawing = false;
+                    ctx.closePath();
+                };
+                
+                canvas.addEventListener('mousedown', startDrawing);
+                canvas.addEventListener('mousemove', draw);
+                canvas.addEventListener('mouseup', stopDrawing);
+                canvas.addEventListener('mouseout', stopDrawing); // Stop if mouse leaves canvas
+
+                controls.addEventListener('click', (e) => {
+                    // Handle color swatches
+                    const swatch = e.target.closest('.color-swatch');
+                    if (swatch) {
+                        // Remove active class from old
+                        controls.querySelector('.color-swatch.active').classList.remove('active');
+                        // Add active class to new
+                        swatch.classList.add('active');
+                        // Set color
+                        ctx.strokeStyle = swatch.dataset.color;
+                    }
+                    
+                    // Handle clear button
+                    const clearBtn = e.target.closest('[data-action="clear-canvas"]');
+                    if (clearBtn) {
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    }
+                });
+                
+                // When window closes, remove listeners
+                windowEl.addEventListener('close', () => {
+                    canvas.removeEventListener('mousedown', startDrawing);
+                    canvas.removeEventListener('mousemove', draw);
+                    canvas.removeEventListener('mouseup', stopDrawing);
+                    canvas.removeEventListener('mouseout', stopDrawing);
+                }, { once: true });
+            }
+
+            bringToFront(windowEl) {
+                if (activeWindow && activeWindow !== windowEl) {
+                    activeWindow.classList.remove('active');
+                    activeWindow.dispatchEvent(new CustomEvent('blur'));
+                }
+                if (activeWindow !== windowEl) {
+                    windowEl.dispatchEvent(new CustomEvent('focus'));
+                }
+                
+                maxZIndex++;
+                windowEl.style.zIndex = maxZIndex;
+                windowEl.classList.add('active');
+                activeWindow = windowEl;
+            }
+            
+            closeWindow(windowEl) {
+                const appId = windowEl.dataset.appId;
+                const windowId = windowEl.dataset.windowId;
+                
+                windowEl.dispatchEvent(new CustomEvent('close')); 
+                windowEl.remove();
+                openWindows.delete(windowId);
+                
+                // Check if any other windows of this app type are open
+                let stillActive = false;
+                for (const win of openWindows.values()) {
+                    if (win.dataset.appId === appId) {
+                        stillActive = true;
+                        break;
+                    }
+                }
+                if (!stillActive) {
+                    this.updateDockActiveState(appId, false);
+                }
+            }
+            
+            minimizeWindow(windowEl) {
+                windowEl.classList.add('minimized');
+                this.updateDockActiveState(windowEl.dataset.appId, true); // Still active, just minimized
+                
+                // De-activate
+                if(activeWindow === windowEl) {
+                    windowEl.dispatchEvent(new CustomEvent('blur')); // Tell game to stop listening
+                    activeWindow = null;
+                }
+            }
+            
+            restoreWindow(windowEl) {
+                windowEl.classList.remove('minimized');
+                this.bringToFront(windowEl);
+            }
+            
+            maximizeWindow(windowEl) {
+                if (windowEl.classList.contains('maximized')) {
+                    // Restore
+                    const prev = windowEl.dataset.prevSize.split(',');
+                    windowEl.style.top = prev[0];
+                    windowEl.style.left = prev[1];
+                    windowEl.style.width = prev[2];
+                    windowEl.style.height = prev[3];
+                    windowEl.classList.remove('maximized');
+                } else {
+                    // Maximize
+                    windowEl.dataset.prevSize = `${windowEl.style.top},${windowEl.style.left},${windowEl.style.width},${windowEl.style.height}`;
+                    windowEl.classList.add('maximized');
+                }
+            }
+            
+            updateDockActiveState(appId, isActive) {
+                const dockIcon = document.querySelector(`.dock-item[data-app-id="${appId}"]`);
+                if (dockIcon) {
+                    dockIcon.classList.toggle('active', isActive);
+                }
+            }
+
+            // --- Event Handlers for Drag/Resize ---
+            
+            onGlobalMouseDown(e) {
+                if (!e) {
+                    console.error("onGlobalMouseDown called without event object!");
+                    return;
+                }
+                
+                // Get the elements that might have been clicked
+                const iconEl = e.target.closest('.desktop-icon');
+                const windowEl = e.target.closest('.app-window');
+                
+                // --- 1. CHECK FOR ALL INTERACTIVE ELEMENTS FIRST ---
+                
+                // Check for dock items
+                if (e.target.closest('.dock-item')) {
+                    // This click is handled by the Dock's own listener
+                    return;
+                }
+                
+                // Check for window controls (close, min, max)
+                const controlButton = e.target.closest('.window-control');
+                const controlAction = controlButton ? controlButton.dataset.action : null;
+                if (controlAction) {
+                    if (windowEl) {
+                        this.bringToFront(windowEl);
+                         switch(controlAction) {
+                            case 'close': this.closeWindow(windowEl); break;
+                            case 'minimize': this.minimizeWindow(windowEl); break;
+                            case 'maximize': this.maximizeWindow(windowEl); break;
+                        }
+                    }
+                    e.preventDefault(); // Prevent this click from also dragging
+                    return; // Handled.
+                }
+                
+                // Check for context menu
+                if (e.target.closest('#context-menu')) {
+                    // This click is handled by the ContextMenu's own listener
+                    return;
+                }
+
+                // Check for any button, input, textarea, or label *inside* a window
+                if (windowEl) {
+                    if (e.target.closest('button') || 
+                        e.target.closest('input') || 
+                        e.target.closest('textarea') || 
+                        e.target.closest('label') ||
+                        e.target.closest('.calc-btn') || // Calculator
+                        e.target.closest('.settings-sidebar-item') || // Settings
+                        e.target.closest('.file-explorer-sidebar-item') || // File Explorer
+                        e.target.closest('.file-explorer-nav-btn') || // File Explorer
+                        e.target.closest('.file-item') ||
+                        e.target.closest('.sketchpad-btn') || // Sketchpad
+                        e.target.closest('.color-swatch') // Sketchpad
+                       ) {
+                        this.bringToFront(windowEl); // Still bring to front
+                        return; // Let the click pass through
+                    }
+                }
+
+                // --- 2. IF NOT INTERACTIVE, CHECK FOR DRAG/RESIZE/FOCUS ---
+                
+                // A. Handle Desktop Icon Drag Start
+                if (iconEl && !windowEl) { // Clicked icon on desktop
+                    this.dragState = {};
+                    this.resizeState = {};
+                    desktopDragState = {
+                        el: iconEl,
+                        startX: e.clientX,
+                        startY: e.clientY,
+                        startLeft: iconEl.offsetLeft,
+                        startTop: iconEl.offsetTop
+                    };
+                    iconEl.classList.add('is-dragging');
+                    // e.preventDefault(); // <-- This was killing dblclick. REMOVED.
+                    return;
+                }
+
+                // B. Handle Window Interactions (Drag, Resize, Focus)
+                if (windowEl) {
+                    this.bringToFront(windowEl); // Bring to front
+
+                    // Check for resize handle click
+                    if (e.target.classList.contains('resize-handle')) {
+                        this.dragState = {};
+                        this.resizeState = {
+                            el: windowEl,
+                            handle: e.target.classList,
+                            startX: e.clientX,
+                            startY: e.clientY,
+                            startWidth: windowEl.offsetWidth,
+                            startHeight: windowEl.offsetHeight,
+                            startTop: windowEl.offsetTop,
+                            startLeft: windowEl.offsetLeft
+                        };
+                        document.body.style.cursor = getComputedStyle(e.target).cursor;
+                        e.preventDefault();
+                        return;
+                    }
+
+                    // Check for drag handle (title bar) click
+                    if (e.target.closest('[data-drag-handle="true"]')) {
+                        this.resizeState = {};
+                        this.dragState = {
+                            el: windowEl,
+                            header: e.target.closest('[data-drag-handle="true"]'),
+                            startX: e.clientX,
+                            startY: e.clientY,
+                            startTop: windowEl.offsetTop,
+                            startLeft: windowEl.offsetLeft
+                        };
+                        this.dragState.header.classList.add('is-dragging');
+                        this.dragState.header.style.cursor = 'grabbing';
+                        e.preventDefault();
+                        return;
+                    }
+                    
+                    // Click was inside a window but not on a button (e.g., empty space)
+                    // We already brought it to the front, so we're done.
+                    // return; // <-- BUG! This was killing clicks inside apps. REMOVED.
+                }
+                
+                // --- 3. Handle Click on Empty Desktop ---
+                // If we're here, we clicked the empty desktop.
+                if (activeWindow) {
+                    activeWindow.classList.remove('active');
+                    activeWindow.dispatchEvent(new CustomEvent('blur')); // Tell game to stop listening
+                    activeWindow = null;
+                }
+            }
+
+            onGlobalMouseMove(e) {
+                // Handle Desktop Icon Dragging
+                if (desktopDragState.el) {
+                    const newTop = desktopDragState.startTop + e.clientY - desktopDragState.startY;
+                    const newLeft = desktopDragState.startLeft + e.clientX - desktopDragState.startX;
+                    desktopDragState.el.style.top = `${newTop}px`;
+                    desktopDragState.el.style.left = `${newLeft}px`;
+                }
+            
+                // Handle Window Dragging
+                if (this.dragState.el) {
+                    const newTop = this.dragState.startTop + e.clientY - this.dragState.startY;
+                    const newLeft = this.dragState.startLeft + e.clientX - this.dragState.startX;
+                    
+                    // --- SNAP TO MAXIMIZE (PURGED) ---
+                    
+                    this.dragState.el.style.top = `${Math.max(0, newTop)}px`;
+                    this.dragState.el.style.left = `${newLeft}px`;
+                }
+                
+                // Handle Resizing
+                if (this.resizeState.el) {
+                    const el = this.resizeState.el;
+                    const { handle, startX, startY, startWidth, startHeight, startTop, startLeft } = this.resizeState;
+                    const dx = e.clientX - startX;
+                    const dy = e.clientY - startY;
+
+                    if (handle.contains('s')) {
+                        el.style.height = `${startHeight + dy}px`;
+                    }
+                    if (handle.contains('n')) {
+                        el.style.top = `${startTop + dy}px`;
+                        el.style.height = `${startHeight - dy}px`;
+                    }
+                    if (handle.contains('e')) {
+                        el.style.width = `${startWidth + dx}px`;
+                    }
+                    if (handle.contains('w')) {
+                        el.style.left = `${startLeft + dx}px`;
+                        el.style.width = `${startWidth - dx}px`;
+                    }
+                }
+            }
+
+            onGlobalMouseUp() {
+                // Handle Desktop Icon Drop
+                if (desktopDragState.el) {
+                    desktopDragState.el.classList.remove('is-dragging');
+                    // Save final position to VFS
+                    this.vfs.updateItemPosition(
+                        desktopDragState.el.dataset.itemId,
+                        desktopDragState.el.offsetLeft,
+                        desktopDragState.el.offsetTop
+                    );
+                    desktopDragState = {};
+                }
+            
+                // Handle Window Drag Drop
+                if(this.dragState.el) {
+                    this.dragState.header.classList.remove('is-dragging');
+                    this.dragState.header.style.cursor = 'grab';
+                    
+                    // --- SNAP TO MAXIMIZE (PURGED) ---
+                }
+                // Handle Window Resize End
+                if(this.resizeState.el) {
+                    document.body.style.cursor = 'default';
+                }
+                this.dragState = {};
+                this.resizeState = {};
+            }
+        }
+        
+        // --- Context Menu Manager ---
+        class ContextMenu {
+            constructor(menuEl, windowManager, vfs) {
+                this.menuEl = menuEl;
+                this.windowManager = windowManager;
+                this.vfs = vfs; // <-- NEW
+                
+                document.addEventListener('contextmenu', this.showMenu.bind(this));
+                document.addEventListener('click', this.hideMenu.bind(this));
+                this.menuEl.addEventListener('click', this.onItemClick.bind(this));
+            }
+            
+            showMenu(e) {
+                e.preventDefault();
+                
+                // Only show desktop context menu if not clicking on a window or icon
+                if (e.target.closest('.app-window') || e.target.closest('.desktop-icon')) {
+                    this.hideMenu();
+                    return;
+                }
+                
+                this.menuEl.style.display = 'flex';
+                // TODO: Add logic to prevent menu from going off-screen
+                this.menuEl.style.top = `${e.clientY}px`;
+                this.menuEl.style.left = `${e.clientX}px`;
+            }
+            
+            hideMenu() {
+                this.menuEl.style.display = 'none';
+            }
+            
+            onItemClick(e) {
+                const action = e.target.dataset.action;
+                if(action) {
+                    switch(action) {
+                        case 'change-wallpaper':
+                            // Open Settings app to 'appearance' pane
+                            this.windowManager.createWindow('settings', { pane: 'appearance' });
+                            break;
+                        case 'new-folder':
+                            // Create folder on desktop
+                            this.vfs.createFolder('desktop', 'New Folder');
+                            break;
+                        case 'about':
+                            this.windowManager.createWindow('about');
+                            break;
+                    }
+                }
+                this.hideMenu();
+            }
+        }
+
+        // --- Dock Manager ---
+        class Dock {
+            constructor(dockEl, windowManager) {
+                this.dockEl = dockEl;
+                this.windowManager = windowManager;
+                this.clockEl = dockEl.querySelector('#dock-clock');
+                this.dateEl = dockEl.querySelector('#dock-date'); // <-- NEW
+                
+                this.dockEl.addEventListener('click', this.onDockClick.bind(this));
+                this.startClock();
+            }
+            
+            onDockClick(e) {
+                const item = e.target.closest('.dock-item');
+                if (!item) return;
+
+                const appId = item.dataset.appId;
+                const action = item.dataset.action;
+
+                if (action === 'open-launcher') {
+                    this.toggleLauncher(true);
+                    return;
+                }
+                
+                if (appId) {
+                    if(appId === 'clock') return;
+                    
+                    // Check if window exists and is minimized
+                    let windowToRestore = null;
+                    for (const win of openWindows.values()) {
+                        if (win.dataset.appId === appId && win.classList.contains('minimized')) {
+                            windowToRestore = win;
+                            break;
+                        }
+                    }
+                    
+                    if (windowToRestore) {
+                        this.windowManager.restoreWindow(windowToRestore);
+                    } else {
+                        this.windowManager.createWindow(appId);
+                    }
+                }
+            }
+            
+            startClock() {
+                const update = () => {
+                    const now = new Date();
+                    this.clockEl.textContent = now.toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                    });
+                    this.dateEl.textContent = now.toLocaleDateString([], {
+                        month: '2-digit',
+                        day: '2-digit',
+                        year: 'numeric'
+                    });
+                };
+                update();
+                setInterval(update, 1000); // Update every second
+            }
+            
+            toggleLauncher(forceOpen) {
+                const launcher = document.getElementById('app-launcher');
+                const grid = launcher.querySelector('[data-app-id="launcher-grid"]');
+                
+                const isVisible = launcher.classList.contains('visible');
+                
+                if (forceOpen === true || !isVisible) {
+                    // Build the grid
+                    grid.innerHTML = ''; // Clear old icons
+                    for (const [appId, app] of Object.entries(this.windowManager.vfs.systemApps)) {
+                        // Don't add "About" to the launcher
+                        if (appId === 'about') continue;
+
+                        const itemEl = document.createElement('div');
+                        itemEl.className = 'launcher-item';
+                        itemEl.dataset.appId = appId;
+                        itemEl.title = app.title;
+                        
+                        itemEl.innerHTML = `
+                            <div class="icon-bg">
+                                <i data-lucide="${app.icon}"></i>
+                            </div>
+                            <span>${app.title}</span>
+                        `;
+                        grid.appendChild(itemEl);
+                    }
+                    lucide.createIcons({ nodes: grid.querySelectorAll('.icon-bg') });
+                    
+                    launcher.classList.add('visible');
+                } else {
+                    launcher.classList.remove('visible');
+                }
+            }
+        }
+        
+        // --- Desktop Icon Manager ---
+        class Desktop {
+            constructor(containerEl, windowManager, vfs) {
+                this.containerEl = containerEl;
+                this.windowManager = windowManager;
+                this.vfs = vfs; // <-- NEW
+                
+                // Re-render desktop if VFS changes
+                this.vfs.addEventListener('update', (e) => {
+                    if (e.detail.path === 'desktop') {
+                        this.renderIcons();
+                    }
+                });
+                
+                this.containerEl.addEventListener('dblclick', this.onIconClick.bind(this));
+                this.renderIcons();
+            }
+            
+            renderIcons() {
+                // Render icons from the VFS 'desktop' path
+                const items = this.vfs.getItems('desktop');
+                this.containerEl.innerHTML = ''; // Clear
+                
+                for (const item of items) {
+                    const itemEl = document.createElement('div');
+                    itemEl.className = 'desktop-icon';
+                    itemEl.dataset.itemId = item.id;
+                    itemEl.dataset.itemType = item.type;
+                    itemEl.title = item.name;
+                    itemEl.style.cssText = `top: ${item.y || 0}px; left: ${item.x || 0}px;`;
+                    
+                    itemEl.innerHTML = `
+                        <div class="icon-bg">
+                            <i data-lucide="${item.icon}"></i>
+                        </div>
+                        <span>${item.name}</span>
+                    `;
+                    this.containerEl.appendChild(itemEl);
+                }
+                lucide.createIcons({
+                   nodes: this.containerEl.querySelectorAll('.icon-bg')
+                });
+            }
+            
+            onIconClick(e) {
+                const icon = e.target.closest('.desktop-icon');
+                if (!icon) return;
+                
+                const itemId = icon.dataset.itemId;
+                const itemType = icon.dataset.itemType;
+                
+                if (itemType === 'app') {
+                    this.windowManager.createWindow(itemId);
+                } else if (itemType === 'folder') {
+                    // Open File Explorer to this folder's path
+                    this.windowManager.createWindow('file-explorer', {
+                        path: `desktop/${itemId}`
+                    });
+                }
+            }
+        }
+        
+
+        // --- Init ---
+        function initAuraOS() {
+            const windowContainer = document.getElementById('window-container');
+            const dockEl = document.getElementById('aura-dock');
+            const contextMenuEl = document.getElementById('context-menu');
+            const desktopEl = document.getElementById('desktop-icon-grid');
+            const launcherEl = document.getElementById('app-launcher'); // <-- NEW
+            
+            // --- Core Service Initialization ---
+            const vfs = new VirtualFileSystem();
+            const windowManager = new WindowManager(windowContainer, vfs);
+            
+            // --- UI Managers ---
+            const dock = new Dock(dockEl, windowManager); // <-- NEW: need instance
+            new ContextMenu(contextMenuEl, windowManager, vfs);
+            new Desktop(desktopEl, windowManager, vfs);
+
+            // --- App Launcher Logic ---
+            const launcherCloseBtn = launcherEl.querySelector('[data-action="close-launcher"]');
+            const launcherGrid = launcherEl.querySelector('[data-app-id="launcher-grid"]');
+            
+            launcherCloseBtn.addEventListener('click', () => dock.toggleLauncher(false));
+            launcherGrid.addEventListener('click', (e) => {
+                const item = e.target.closest('.launcher-item');
+                if (item && item.dataset.appId) {
+                    windowManager.createWindow(item.dataset.appId);
+                    dock.toggleLauncher(false); // Close after launching
+                }
+            });
+
+
+            // Boot Sequence
+            const bootScreen = document.getElementById('aura-boot-screen');
+            setTimeout(() => {
+                bootScreen.style.opacity = '0';
+                bootScreen.addEventListener('transitionend', () => {
+                    bootScreen.style.display = 'none';
+                });
+            }, 1500); // Show boot for 1.5s
+            
+            // --- Welcome Modal Logic (REMOVED) ---
+            
+            // Pre-load a window for demo
+            setTimeout(() => {
+                 windowManager.createWindow('about');
+            }, 2000); // Open after boot
+        }
+
+        // Start the OS on load
+        window.addEventListener('load', initAuraOS);
+        
+    </script>
+</body>
+</html>
